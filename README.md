@@ -1,2 +1,2 @@
-# php-agent
-ServerSpy Stateless PHP Agent
+# ServerSpy PHP Agent
+Providing stateless backup for PHP based websites.

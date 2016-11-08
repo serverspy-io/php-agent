@@ -4,8 +4,8 @@
  * ServerSpy PHP Backup Agent
  * Description: This is a stateless server backup agent controlled by https://serverspy.io. This file is open
  *   source and requires no configuration settings to be set unless directed by technical support to do so. If
- *   you have any questions, comments, bug reports, or security concerns; please reach out to us. 
- * 
+ *   you have any questions, comments, bug reports, or security concerns; please reach out to us.
+ *
  * hello@serverspy.io
  * https://serverspy.io
  * https://github.com/serverspy-io
@@ -13,11 +13,11 @@
 
 // API Information
 define("API", "api.serverspy.io/dev/");
-define("CLIENT_VERSION", "0.1"); 
+define("CLIENT_VERSION", "0.1");
 
 // If someone calls the serverspy.php file directly, we will show a splash page with information on our product.
 // If you would like to instead return a 404, change this setting to false.
-define("SPLASH", true); 
+define("SPLASH", true);
 
 class serverspy {
 
@@ -38,7 +38,7 @@ class serverspy {
      *   we will present an error page.
      **/
     public function __construct($taskId) {
- 
+
       // Valid both the and the task are valid UUIDs
       if(!$this->isUUID($taskId))
         throw new Exception("TaskId is not in valid format.");
@@ -51,7 +51,7 @@ class serverspy {
 
     /**
      * Static Constructor
-     * Description: Only here to make the initialisation code look cooler. 
+     * Description: Only here to make the initialisation code look cooler.
      **/
     public function staticInit($taskId) {
 
@@ -63,7 +63,7 @@ class serverspy {
     /**
      * Retrieve a task.
      * Description: This will make a callback to the ServerSpy API over an SSL connection to gather
-     *   the task to perform. This 
+     *   the task to perform. This
      **/
     public function retrieveTask() {
 
@@ -89,7 +89,7 @@ class serverspy {
      * Description: We have a very limited set of code that can be executed in relation to a task. There
      *   is no ability to eval, change endpoints, or in general break out of our sandbox without prior
      *   modification of this file. (In other words, you were already hacked.) This will attempt to verify
-     *   that the requested task can be performed by the agent, and if so, perform it. 
+     *   that the requested task can be performed by the agent, and if so, perform it.
      **/
     public function performTask() {
 
@@ -164,6 +164,26 @@ class serverspy {
      **/
     private function task_metrics() {
 
+      $callObject = $this->callObject("metrics", "POST");
+
+      // Setup request body
+      $body = new stdClass;
+      $body->taskId = $this->taskId;
+
+      // Collect Load Metrics
+      $body->data->load = sys_getloadavg();
+
+      // Collect Disk Metrics
+      $body->data->disk           = new stdClass;
+      $body->data->disk->free     = disk_free_space(__DIR__);
+      $body->data->disk->capacity = disk_total_space(__DIR__);
+
+      $callObject->body =& $body;
+
+      $this->taskResponse = $this->call($callObject);
+
+      return $this;
+
     }
 
     /**
@@ -175,7 +195,7 @@ class serverspy {
     private function task_map($dir = false) {
 
       // $dir would be set to __DIR__ only on the verify request
-      // where we lack filesystem insight. 
+      // where we lack filesystem insight.
       $dir = !$dir?$this->taskData:$dir;
 
       // Create the map object
@@ -193,18 +213,18 @@ class serverspy {
           // Skip parent directories (..) and define the type of data.
           if($object === "." || $object === "..")
             continue;
-          
+
           // Create reference for brevity
           $m =& $map->$object;
 
           // Gleen what type of entry this is
-          if(is_link("{$dir}/{$object}"))   
+          if(is_link("{$dir}/{$object}"))
             $m->type = "symlink";
-          elseif(is_file("{$dir}/{$object}")) 
+          elseif(is_file("{$dir}/{$object}"))
             $m->type = "file";
-          elseif(is_dir("{$dir}/{$object}")) 
+          elseif(is_dir("{$dir}/{$object}"))
             $m->type = "dir";
-          else 
+          else
             $m->type = "unknown";
 
           // Stat the entry
@@ -229,7 +249,7 @@ class serverspy {
       } catch(Exception $e) {
 
         $map->error = $e->getMessage();
-  
+
       }
 
       $callObject = $this->callObject("/maps", "POST");
@@ -242,23 +262,37 @@ class serverspy {
 
     /**
      * Backup a file.
-     * Description: This will open an SSL socket to our server and send the file to it in small chunks. The only 
+     * Description: This will open an SSL socket to our server and send the file to it in small chunks. The only
      *   accompanying information along with the file is the taskId which will be included in the first 32 bits.
      *   Once we have received the file, we will run an AV check, check to see if there are any newer versions of
      *   the file available, and finally store it for long term recovery.
      **/
     private function task_push() {
 
+      $this->taskResponse = new stdClass;
+      $this->taskResponse->status = false;
+
       // SSL connection to the upload server
-      $upload = fsockopen("ssl://upload.serverspy.io", 443, $errno, $errstr, 5);
+      $upload = fsockopen("ssl://upload.serverspy.io", 443, $this->taskResponse->errno, $this->taskResponse->errstr, 90);
+      if($this->taskResponse->errno)
+        return $this;
 
       // Send taskId to server first
-      $write = fwrite($upload, $this->taskId);
+      fwrite($upload, pack("H*", str_replace("-", "", $this->taskId)));
+      fflush($upload);
 
       // Break down the file into chunks for sending
-      $local = fopen($this->taskData,"r");
-      while(!feof($local))
-        fwrite($upload,fread($local,64000));
+      $local = @fopen($this->taskData,"r");
+
+      // Error opening the local file
+      if(!$local)
+        return $this;
+
+      // Read file into TCP socket
+      while(!feof($local)) {
+        fwrite($upload, fread($local, 256000)); // 256KB
+        fflush($upload);
+      }
 
       // Close the file and socket
       fclose($local);
@@ -266,9 +300,6 @@ class serverspy {
 
       // In theory we wont get here unless the above finishes succesfully. If it does not respond with a true
       // to the caller, then we will re-initiate at the last chunk.
-      $this->taskResponse = new stdClass;
-      $this->taskResponse->status = true;
-     
       return $this;
 
     }
@@ -306,16 +337,16 @@ class serverspy {
      * Callback
      * Description: This is the HTTP callback function which will make the necessary REST
      *   calls to our server either asking for task information, or responding with the
-     *   data of a completed task. 
+     *   data of a completed task.
      **/
     private function call($callObject) {
 
       $req = curl_init($callObject->url);
 
       // POSTing JSON body to endpoint
-      if(isset($callObject->body) && 
+      if(isset($callObject->body) &&
          is_object($callObject->body)) {
-  
+
         $data = json_encode($callObject->body);
         curl_setopt($req, CURLOPT_POSTFIELDS, $data);
         $callObject->headers[] = 'Content-Length: ' . strlen($data);
@@ -363,11 +394,34 @@ class serverspy {
     }
 
     /**
-     * Display a static webpage to the caller. 
+     * Display a static marketing webpage to the caller.
+     * This HTML is compressed and base64 encoded, not to obsfucate code but to keep the filesize small. The output of the base64 encoded string below can be seen
+     * by opening the serverspy.php file directly from your browser. If you wish to not display this page, and instead return a 404 message, change SPLASH to false
+     * on line 20 of this file.
      */
     public static function splashPage() {
 
-      echo("<html><head><title>ServerSpy Backup</title></head><body>This website utilizes backup software from <a href='//serverspy.io'>www.serverspy.io</a>!</body></html>");
+      // If the user has set SPLASH to false, instead die with a 404 status code.
+      if(!SPLASH) {
+        header($_SERVER["SERVER_PROTOCOL"]." 404 Not Found", true, 404);
+        die;
+      }
+
+      $html = "eNqdVtuO2zYQfW6+grtpiwQYyfba3sbypSiaoO1TCyRAW6R5oMSRxF2KVEjKlxj+9w4p2/HmsigKwzZJDWfOnLlpcfXy95/f/P3HK1b7Rq0W4Zcprqsl6tWiQc9ZUXPr0C8".
+              "7XyYvjmeaN7hcS9y0xnpWGO1R++X1RgpfLwWuZYFJ3IDU0kuuEldwhcsRNHwrm6457a8vFQp0hZWtl0afdTrp8eJ8tfDSK1y9qaVj4Rmj/9YajwXJMa4Fa80GLa3zHXuNdo".
+              "32dbtLpVkM+psLJfU9qy2Wy+va+zYbDEqy5dLKmEohb6VLC9MMCud+LHkj1W750jjpspvhECbD4bVFtXR+p9DViJ75XYtLj1sfbhy1fyISjQVbjowRAYXQaW6Md97yNmyCv".
+              "QAi4Rt0psHBJL1Nx0Hhg+O0kSQbrFwlyVtZMuXZb6/Y7N3qyTeLniLmbHH2KwRz6mrZHH0rjMBoy631wNtO3/ci6Z2jOAx6Dasni6u3qIUs3yXJf7VEoMZJg0Ly9x1aiS65".
+              "c183+pn0YwAijysOPM8t8MIavWuAC2HROcghFwZyWUGuTHH/vqNEgNyIHZBw3nlvNBSUJRBQgBAgUIEoNQi5BkFLD9hAKVEJSnEojW2gHkF9A/UY6gnUU6hvIZAEEmRTUTo".
+              "7uM8FKKwIIihJCd2Cye8o/8AoaKG1CO/B8aYF13ClwLVcA4Xa6Apcl9O3Bc9zheAjUi/Al5QNQNXia+S0teA9dArW3O4bbiups+G8JaelrsKK8jEUQ0Z5xr1c4+HsAWHc58".
+              "YKtNnwEDaUbn0lZqPh8Lt5jbKqfcY7b+b9cVj+M5ufLs0/JFIL3GajA7deFgSTOxnIozKVyhFZVcFjLYZlR94G8GghQA9/lTXkYYO6A83X4IgZEt4L6VrFd1kM1BdciFz0T".
+              "Ou2IzaopLhFvo8V0FdiFisRfkW1RsLG4SdLvWUeJTa9Z1Sl83A14UpWOiuoh6Cd09P8XpKaIOkaAlwHKrkOvUlyh+IsEi87+QETLu465zNt9AW6/ZHBwGY83ee8uA8+a5E9".
+              "HRfj2VjMDXWdUplNss1qKQTqjye7nvvcbBNXc2E22ZAl45t2y4bMVjl/NoTwScc3zxklG/pDuqEuse+DNaMQfozo7HbYbr/g7TFTEm/a7AdSPT/mULR8ioPU1KowieE4pMp".
+              "U5phqSW6obposgHpEmoXsusisB/E91KM+boHIXtNlkMYUpMIoY7Po8s10CqdvOnk+j6aOPMe7Cj35lVAlFSFsyejs0wns7eQC7AkC4/tHrETeBPUny2MmxjjX4wvco+knuC".
+              "dn3E8x/yGfzh5AHb34DEMaNq4+8nQ7CfE6OTad0eZcBzx3RnUe55fsKyx9NiVyz8lpuXahS2VxRaWDfz1LSILc+eqjA3XW2EQXFLLYtk+zyI1T3vAPRvNNP/RcHJguDswBp".
+              "xbnB70HaasrxhXN+F9ooH0cuN9Tn5uzUAK06Vq2kb5+MHavrgu675a9mtWCGi/rT0Jarxb84XS8BHCUC8n2/6CHm2fgl6Bo1nB61xn1rxHEbXyT6LxUFHYX3SFfnCn9hloQ".
+              "K61p2GNIV5eboPtqMSDti3pMFpB5Y5RjSBK7YKzhjrKZaUTh6BlzXVHQOmV/HoH09oGF9pSspe0cxDebxtDLlLFUAil7GAbnQ7MOnnr27ZS1pJ6EfZ0SjjF5S6yv/gUf7ZVf";
+
+      echo(gzuncompress(base64_decode($html)));
       exit();
 
     }

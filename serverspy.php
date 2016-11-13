@@ -170,18 +170,27 @@ class serverspy {
       $body = new stdClass;
       $body->taskId = $this->taskId;
 
-      // Collect Load Metrics
-      $body->data->load = sys_getloadavg();
+      // All metrics are loaded by calling the data from /proc system. This data is passed along unprocessed
+      // for future-proofing and in an effort to keep load as low as possible.
+      $metrics = array(
+        "stat"      => "/proc/stat",
+        "uptime"    => "/proc/uptime",
+        "version"   => "/proc/version",
+        "meminfo"   => "/proc/meminfo",
+        "loadavg"   => "/proc/loadavg",
+        "network"   => "/proc/self/net/dev",
+        "diskstats" => "/proc/diskstats"
+      );
 
-      // Collect Disk Metrics
-      $body->data->disk           = new stdClass;
-      $body->data->disk->free     = disk_free_space(__DIR__);
-      $body->data->disk->capacity = disk_total_space(__DIR__);
+      // For each metric, check if we can read it, save contents.
+      foreach($metrics as $metric => $location)
+        if(is_file($location)) $body->data->$metric = rtrim(file_get_contents($location));
 
+      // Create return body
       $callObject->body =& $body;
-
       $this->taskResponse = $this->call($callObject);
 
+      // Finalize
       return $this;
 
     }
